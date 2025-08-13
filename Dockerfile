@@ -1,25 +1,27 @@
-# Use an official Python runtime as a parent image
+# Use official Python base image
 FROM python:3.10
-RUN apt-get update && apt-get install -y libgl1-mesa-glx
 
-
-# Set the working directory to /app
+# Set working directory inside container
 WORKDIR /app
 
+# Install system dependencies (only if needed, here libgl1 is the replacement)
+# If you don't need OpenGL at all, you can comment this out
+RUN apt-get update && apt-get install -y libgl1 && rm -rf /var/lib/apt/lists/*
 
-COPY . /app
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
 
+# Copy requirements first (for caching)
+COPY requirements.txt .
 
-# Install any needed packages specified in requirements.txt
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
-# Install the necessary system libraries for OpenCV
-RUN pip install google-cloud-vision
 
+# Copy the rest of the application code
+COPY . .
 
-# Expose the port that Uvicorn will run on
+# Expose FastAPI port
 EXPOSE 8000
 
-# Command to run the application using Uvicorn
-#CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port","8000","--workers","4"]
+# Start FastAPI app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-
