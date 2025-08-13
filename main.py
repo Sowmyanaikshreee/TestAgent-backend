@@ -766,32 +766,44 @@ import tempfile
 import fitz  # PyMuPDF
 from PIL import Image
 from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv()
+
  
 @app.post("/upload_student_assessment/")
 async def upload_student_assessment(file: UploadFile = File(...), category: str = Form(...)):
     try:
-        # ✅ Ensure path to credentials is correct and exists
-        credentials_path = Path(os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")).resolve()
-        if not credentials_path.exists():
-            raise FileNotFoundError(f"Service account file not found at: {credentials_path}")
- 
-        credentials = service_account.Credentials.from_service_account_file(str(credentials_path))
-        client = vision.ImageAnnotatorClient(credentials=credentials)
- 
+        # ✅ Get Vision API key from environment
+        VISION_API_KEY = os.getenv("GOOGLE_VISION_API_KEY")
+        if not VISION_API_KEY:
+            raise ValueError("Please set GOOGLE_VISION_API_KEY in environment.")
+
         # ✅ Save uploaded file
         temp_dir = tempfile.mkdtemp()
         file_path = os.path.join(temp_dir, file.filename)
- 
         with open(file_path, "wb") as f:
             f.write(await file.read())
- 
+
         extracted_text = ""
- 
+
+        # ✅ Use Google Vision API with API key
         def extract_text_from_image(image_bytes):
-            image = vision.Image(content=image_bytes)
-            response = client.document_text_detection(image=image)
-            return response.full_text_annotation.text if response.full_text_annotation else ""
- 
+            img_b64 = base64.b64encode(image_bytes).decode("utf-8")
+            url = f"https://vision.googleapis.com/v1/images:annotate?key={VISION_API_KEY}"
+            payload = {
+                "requests": [
+                    {
+                        "image": {"content": img_b64},
+                        "features": [{"type": "DOCUMENT_TEXT_DETECTION"}]
+                    }
+                ]
+            }
+            r = requests.post(url, json=payload)
+            r.raise_for_status()
+            data = r.json()
+            return data["responses"][0].get("fullTextAnnotation", {}).get("text", "")
+
         # ✅ Extract image(s) from PDF or use directly
         if file.filename.lower().endswith(".pdf"):
             doc = fitz.open(file_path)
@@ -802,31 +814,31 @@ async def upload_student_assessment(file: UploadFile = File(...), category: str 
         else:
             with open(file_path, "rb") as img_file:
                 extracted_text += extract_text_from_image(img_file.read())
- 
+
         if not extracted_text.strip():
             return {"error": "No readable text found in the uploaded file."}
- 
+
         if category not in category_indexes:
             return {"error": "Category not found. Upload a document first."}
- 
+
         _, chunk_store = category_indexes[category]
         material = "\n".join(chunk_store)[-3000:]
- 
+
         # ✅ Prompt for Gemini
         prompt = f"""
 You are a teacher assistant.
- 
+
 Evaluate the student's answers below using the study material provided. Return detailed output in this exact structure for each question:
- 
+
 ---
 Question: <insert question text>
 Student Answer: <insert answer>
 Marks: x/y
 Feedback: <insert feedback>
 ---
- 
+
 Use only the material provided. Be objective and concise.
- 
+
 === STUDENT ANSWERS ===
 {extracted_text}
 === STUDY MATERIAL ===
@@ -834,37 +846,44 @@ Use only the material provided. Be objective and concise.
 """
         response = model.generate_content(prompt)
         feedback = response.text.strip()
- 
+
         # ✅ Compute total marks
         marks = re.findall(r"Marks:\s*(\d+)\s*/\s*(\d+)", feedback)
         total = sum(int(m[0]) for m in marks)
         out_of = sum(int(m[1]) for m in marks)
         summary_line = f"Total Marks: {total}/{out_of}\n\n"
- 
+
         # ✅ Generate PDF feedback
         class FeedbackPDF(FPDF):
             def header(self):
                 self.set_font("Arial", "B", 14)
                 self.cell(0, 10, "Assessment Feedback", ln=True, align="C")
                 self.ln(5)
- 
+
             def add_feedback(self, text):
                 safe_text = text.encode("latin-1", "replace").decode("latin-1")
                 self.set_font("Arial", "", 12)
                 self.multi_cell(0, 10, safe_text)
                 self.ln(5)
- 
+
         pdf = FeedbackPDF()
         pdf.add_page()
         pdf.add_feedback(summary_line + feedback)
- 
+
         pdf_bytes = pdf.output(dest="S").encode("latin1")
         return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf", headers={
             "Content-Disposition": "attachment; filename=feedback.pdf"
         })
- 
+
     except Exception as e:
         import traceback
         traceback.print_exc()
         return JSONResponse(status_code=500, content={"error": str(e)})
+ 
+ # This is crucial for Cloud Run
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
+
  

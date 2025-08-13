@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+.env
+.env.*
+
+
+
+# VS Code and PyCharm settings
+.vscode/
+.idea/
+
+# Logs and temp files
+*.log
+*.tmp
+
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Python wheels
+*.whl
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+
+
+# Docker artifacts
+*.pid
+*.tar
+*.lock
+
+# pytest
+.cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# Mac and Windows system files
+ehthumbs.db
+Icon?
