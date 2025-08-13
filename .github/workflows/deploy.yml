@@ -49,10 +49,10 @@ jobs:
 
       - name: Build The Docker Image
         run: |
-          echo "Building Docker image with tag: themadrastechie/karanji-backend:${{ steps.set_tag.outputs.tag }}"
+          echo "Building Docker image with tag: Sowmyanaikshreee/TestAgent-backend:${{ steps.set_tag.outputs.tag }}"
           docker build . \
             --file Dockerfile \
-            --tag themadrastechie/karanji-backend:${{ steps.set_tag.outputs.tag }} \
+            --tag Sowmyanaikshreee/TestAgent-backend:${{ steps.set_tag.outputs.tag }} \
             --build-arg APP_VERSION=${{ steps.set_tag.outputs.tag }} \
             --build-arg BUILD_DATETIME=${{ steps.current_datetime.outputs.datetime }} \
             --build-arg COMMIT_AUTHOR="${{ steps.commit_author.outputs.author }}" \
@@ -78,11 +78,11 @@ jobs:
         run: |
           TAG=${{ steps.set_tag.outputs.tag }}
           echo "Pushing Docker image with tag: $TAG"
-          if [[ "$(docker images -q themadrastechie/karanji-backend:${TAG} 2> /dev/null)" == "" ]]; then
-            echo "Error: Docker image themadrastechie/karanji-backend:${TAG} does not exist."
+          if [[ "$(docker images -q Sowmyanaikshreee/TestAgent-backend:${TAG} 2> /dev/null)" == "" ]]; then
+            echo "Error: Docker image Sowmyanaikshreee/TestAgent-backend:${TAG} does not exist."
             exit 1
           fi
-          docker push themadrastechie/karanji-backend:${TAG}
+          docker push Sowmyanaikshreee/TestAgent-backend:${TAG}
 
   deploy:
     needs: build-and-publish
@@ -105,7 +105,7 @@ jobs:
               exit 1
             fi
 
-            sudo docker pull themadrastechie/karanji-backend:${TAG}
+            sudo docker pull Sowmyanaikshreee/TestAgent-backend:${TAG}
             
             if sudo docker ps -a --format '{{.Names}}' | grep -Eq '^karanji-backend-container$'; then
               echo "Stopping and removing existing container..."
@@ -119,7 +119,7 @@ jobs:
             fi
 
             echo "Running new Docker container with tag: ${TAG}"
-            sudo docker run -d --name karanji-backend-container -p 8000:8000 themadrastechie/karanji-backend:${TAG}
+            sudo docker run -d --name karanji-backend-container -p 8000:8000 Sowmyanaikshreee/TestAgent-backend:${TAG}
 
             echo "Removing all unused Docker images..."
             sudo docker image prune -a -f
