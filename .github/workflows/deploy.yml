@@ -9,9 +9,9 @@ name: ISCAN MARS AI API container
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
 
 jobs:
   build-and-publish:
@@ -99,7 +99,7 @@ jobs:
           TAG: ${{ needs.build-and-publish.outputs.tag }}
         run: |
           echo "Deploying Docker image on remote server with tag: ${TAG}"
-          ssh -o StrictHostKeyChecking=no -i "sundar_file.pem" ubuntu@ec2-13-204-31-17.ap-south-1.compute.amazonaws.com << EOF
+          ssh -o StrictHostKeyChecking=no -i "sundar_file.pem" ubuntu@ec2-13-201-176-7.ap-south-1.compute.amazonaws.com << EOF
             if [[ -z "${TAG}" ]]; then
               echo "Error: TAG is empty. Exiting deployment."
               exit 1
