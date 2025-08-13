@@ -1,59 +1,128 @@
 name: ISCAN MARS AI API container
 
+# API container workflow for Docker
+# Includes image building, pushing, and deployment
+
+# api container
+# docker name
+# port number
+
 on:
   push:
-    branches:
-      - main
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
 
 jobs:
   build-and-publish:
     runs-on: ubuntu-latest
-
     outputs:
-      full_tag: ${{ steps.set-vars.outputs.full_tag }}
+      tag: ${{ steps.set_tag.outputs.tag }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Set lowercase image name and tag
-        id: set-vars
+      - name: Set Commit Message Tag
+        id: set_tag
         run: |
-          IMAGE_NAME=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
-          TAG="addeddeployyml"
-          FULL_TAG="$IMAGE_NAME:$TAG"
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
-          echo "TAG=$TAG" >> $GITHUB_ENV
-          echo "FULL_TAG=$FULL_TAG" >> $GITHUB_ENV
-          echo "full_tag=$FULL_TAG" >> $GITHUB_OUTPUT
+          COMMIT_MESSAGE_TAG=$(echo "${{ github.event.head_commit.message }}" | tr -cd '[:alnum:]-_')
+          echo "Tag set to: ${COMMIT_MESSAGE_TAG}"
+          echo "::set-output name=tag::${COMMIT_MESSAGE_TAG}"
 
-      - name: Log in to Docker Hub
+      - name: Get Current Date and Time
+        id: current_datetime
+        run: |
+          CURRENT_DATETIME=$(date +"%Y-%m-%dT%H:%M:%S")
+          echo "Current DateTime: ${CURRENT_DATETIME}"
+          echo "::set-output name=datetime::${CURRENT_DATETIME}"
+
+      - name: Get Commit Author
+        id: commit_author
+        run: |
+          COMMIT_AUTHOR="${{ github.event.head_commit.author.name }}"
+          COMMIT_EMAIL="${{ github.event.head_commit.author.email }}"
+          echo "Commit Author: ${COMMIT_AUTHOR}"
+          echo "Commit Email: ${COMMIT_EMAIL}"
+          echo "::set-output name=author::${COMMIT_AUTHOR}"
+          echo "::set-output name=email::${COMMIT_EMAIL}"
+
+      - name: Build The Docker Image
+        run: |
+          echo "Building Docker image with tag: themadrastechie/karanji-backend:${{ steps.set_tag.outputs.tag }}"
+          docker build . \
+            --file Dockerfile \
+            --tag themadrastechie/karanji-backend:${{ steps.set_tag.outputs.tag }} \
+            --build-arg APP_VERSION=${{ steps.set_tag.outputs.tag }} \
+            --build-arg BUILD_DATETIME=${{ steps.current_datetime.outputs.datetime }} \
+            --build-arg COMMIT_AUTHOR="${{ steps.commit_author.outputs.author }}" \
+            --build-arg COMMIT_EMAIL="${{ steps.commit_author.outputs.email }}" \
+            --progress=plain
+
+      - name: List Docker Images for Debugging
+        run: |
+          echo "Listing all Docker images after build:"
+          docker images
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build Docker image
+      - name: Push Docker Image
+        id: docker_push
         run: |
-          echo "Building Docker image with tag: $FULL_TAG"
-          docker build -t $FULL_TAG .
-
-      - name: Push Docker image
-        run: docker push $FULL_TAG
+          TAG=${{ steps.set_tag.outputs.tag }}
+          echo "Pushing Docker image with tag: $TAG"
+          if [[ "$(docker images -q themadrastechie/karanji-backend:${TAG} 2> /dev/null)" == "" ]]; then
+            echo "Error: Docker image themadrastechie/karanji-backend:${TAG} does not exist."
+            exit 1
+          fi
+          docker push themadrastechie/karanji-backend:${TAG}
 
   deploy:
     needs: build-and-publish
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v0.1.8
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            docker pull ${{ needs.build-and-publish.outputs.full_tag }}
-            docker stop test-backend || true
-            docker rm test-backend || true
-            docker run -d --name test-backend -p 8000:8000 ${{ needs.build-and-publish.outputs.full_tag }}
+      - name: Setup SSH Key
+        run: |
+          echo "${{ secrets.SSH_KEY }}" > sundar_file.pem
+          chmod 600 sundar_file.pem
+
+      - name: Deploy Docker on Remote Server
+        env:
+          TAG: ${{ needs.build-and-publish.outputs.tag }}
+        run: |
+          echo "Deploying Docker image on remote server with tag: ${TAG}"
+          ssh -o StrictHostKeyChecking=no -i "sundar_file.pem" ubuntu@ec2-13-204-31-17.ap-south-1.compute.amazonaws.com << EOF
+            if [[ -z "${TAG}" ]]; then
+              echo "Error: TAG is empty. Exiting deployment."
+              exit 1
+            fi
+
+            sudo docker pull themadrastechie/karanji-backend:${TAG}
+            
+            if sudo docker ps -a --format '{{.Names}}' | grep -Eq '^karanji-backend-container$'; then
+              echo "Stopping and removing existing container..."
+              sudo docker stop karanji-backend-container
+              sudo docker rm karanji-backend-container
+              echo "Removing associated image..."
+              IMAGE_ID=$(sudo docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep '^karanji-backend' | awk '{print $2}')
+              if [ -n "$IMAGE_ID" ]; then
+                sudo docker rmi "$IMAGE_ID"
+              fi
+            fi
+
+            echo "Running new Docker container with tag: ${TAG}"
+            sudo docker run -d --name karanji-backend-container -p 8000:8000 themadrastechie/karanji-backend:${TAG}
+
+            echo "Removing all unused Docker images..."
+            sudo docker image prune -a -f
+
+            echo "Deployment completed successfully!"
+          EOF
